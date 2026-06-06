@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Record Player</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #0a0a0a;
+      overflow: hidden;
+      font-family: 'Space Mono', monospace;
+      color: #f0f0ed;
+      cursor: none;
+    }
+    #c { display: block; width: 100%; height: 100%; }
+
+    .hud {
+      position: fixed; top: 0; left: 0; right: 0;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 22px 36px; pointer-events: none; z-index: 10;
+    }
+    .hud-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 26px; letter-spacing: 0.12em; color: #c8f060;
+    }
+    .hud-hint {
+      font-size: 10px; color: rgba(255,255,255,0.25);
+      letter-spacing: 0.1em; text-transform: uppercase;
+    }
+
+    #center-hint {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      pointer-events: none; z-index: 5; gap: 10px;
+      transition: opacity 0.8s ease;
+    }
+    #center-hint.hidden { opacity: 0; }
+    .ch-circle {
+      width: 72px; height: 72px; border-radius: 50%;
+      border: 2px solid rgba(200,240,96,0.4);
+      display: flex; align-items: center; justify-content: center;
+      animation: pulse-ring 2s ease-in-out infinite;
+    }
+    .ch-circle svg { width: 28px; height: 28px; fill: #c8f060; opacity: 0.7; }
+    .ch-text {
+      font-size: 11px; color: rgba(255,255,255,0.3);
+      letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    @keyframes pulse-ring {
+      0%, 100% { transform: scale(1); opacity: 0.5; border-color: rgba(200,240,96,0.3); }
+      50% { transform: scale(1.08); opacity: 1; border-color: rgba(200,240,96,0.7); }
+    }
+
+    #song-info {
+      position: fixed; bottom: 36px; left: 36px;
+      opacity: 0; transform: translateY(12px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+      pointer-events: none; z-index: 10;
+    }
+    #song-info.visible { opacity: 1; transform: translateY(0); }
+    .song-label {
+      font-size: 9px; color: #c8f060;
+      letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 4px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .song-label::before {
+      content: '';
+      width: 6px; height: 6px; border-radius: 50%; background: #c8f060;
+      animation: blink 1s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+    .song-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 30px; letter-spacing: 0.05em; line-height: 1;
+    }
+    .song-artist { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 3px; }
+
+    #eq {
+      position: fixed; bottom: 36px; right: 36px;
+      display: flex; align-items: flex-end; gap: 3px;
+      height: 44px; opacity: 0; transition: opacity 0.5s;
+      z-index: 10;
+    }
+    #eq.visible { opacity: 1; }
+    .eq-bar {
+      width: 3px; height: 4px; background: #c8f060;
+      border-radius: 2px; transition: height 0.1s;
+    }
+    .eq-bar.playing { animation: eqAnim var(--dur,0.5s) ease-in-out infinite alternate; }
+    @keyframes eqAnim { from{height:4px} to{height:40px} }
+
+    #progress-bar {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      height: 2px; background: rgba(255,255,255,0.06); z-index: 10;
+    }
+    #progress-fill {
+      height: 100%; width: 0%; background: #c8f060;
+      transition: width 0.8s linear;
+    }
+
+    #cur {
+      position: fixed; pointer-events: none; z-index: 999;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #c8f060;
+      transform: translate(-50%,-50%);
+      transition: width .15s, height .15s;
+      mix-blend-mode: difference;
+    }
+    #cur.hover { width: 24px; height: 24px; }
+
+    #click-ring {
+      position: fixed; pointer-events: none; z-index: 998;
+      width: 48px; height: 48px; border-radius: 50%;
+      border: 1.5px solid #c8f060;
+      transform: translate(-50%,-50%) scale(0);
+      opacity: 0;
+    }
+    #click-ring.burst { animation: burst 0.6s ease-out forwards; }
+    @keyframes burst {
+      0%   { transform:translate(-50%,-50%) scale(0); opacity:1; }
+      100% { transform:translate(-50%,-50%) scale(3.5); opacity:0; }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div class="hud">
+  <div class="hud-title">Record Player</div>
+  <div class="hud-hint">Arrastra para rotar · Click para reproducir</div>
+</div>
+
+<div id="center-hint">
+  <div class="ch-circle">
+    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+  </div>
+  <div class="ch-text">Toca el tocadiscos</div>
+</div>
+
+<div id="song-info">
+  <div class="song-label">Reproduciendo</div>
+  <div class="song-title">Beso</div>
+  <div class="song-artist">Jósean Log</div>
+</div>
+
+<div id="eq">
+  <div class="eq-bar" style="--dur:.35s"></div>
+  <div class="eq-bar" style="--dur:.55s"></div>
+  <div class="eq-bar" style="--dur:.42s"></div>
+  <div class="eq-bar" style="--dur:.68s"></div>
+  <div class="eq-bar" style="--dur:.38s"></div>
+  <div class="eq-bar" style="--dur:.60s"></div>
+  <div class="eq-bar" style="--dur:.44s"></div>
+  <div class="eq-bar" style="--dur:.50s"></div>
+</div>
+
+<div id="progress-bar"><div id="progress-fill"></div></div>
+<div id="cur"></div>
+<div id="click-ring"></div>
+
+<script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ── AUDIO ──
+const audio = new Audio('beso.mp3');
+audio.loop = true;
+let playing = false;
+
+// ── RENDERER ──
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.4;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+// ── SCENE ──
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a0a);
+scene.fog = new THREE.FogExp2(0x0a0a0a, 0.06);
+
+// ── CAMERA ──
+const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.01, 100);
+camera.position.set(0, 1.8, 4.5);
+
+// ── CONTROLS ──
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+controls.enablePan = false;
+controls.minDistance = 1.5;
+controls.maxDistance = 8;
+controls.maxPolarAngle = Math.PI * 0.72;
+controls.minPolarAngle = Math.PI * 0.1;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.5;
+controls.target.set(0, 0, 0);
+
+// ── LUCES ──
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+const key = new THREE.DirectionalLight(0xffffff, 3);
+key.position.set(4, 6, 4);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.near = 0.1;
+key.shadow.camera.far = 20;
+key.shadow.camera.left = -5;
+key.shadow.camera.right = 5;
+key.shadow.camera.top = 5;
+key.shadow.camera.bottom = -5;
+scene.add(key);
+
+const fill = new THREE.DirectionalLight(0xc8f060, 0.4);
+fill.position.set(-4, 2, -3);
+scene.add(fill);
+
+const rim = new THREE.DirectionalLight(0x6080ff, 0.6);
+rim.position.set(0, 4, -5);
+scene.add(rim);
+
+// spotlight que pulsa con la música
+const spot = new THREE.SpotLight(0xc8f060, 0, 12, Math.PI * 0.18, 0.6, 1.5);
+spot.position.set(0, 7, 1);
+spot.target.position.set(0, 0, 0);
+scene.add(spot);
+scene.add(spot.target);
+
+// ── SUELO ──
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(30, 30),
+  new THREE.MeshStandardMaterial({ color: 0x0d0d0d, roughness: 0.95, metalness: 0.05 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -1.2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// anillo neón suelo
+const neonRing = new THREE.Mesh(
+  new THREE.RingGeometry(1.4, 1.46, 80),
+  new THREE.MeshBasicMaterial({ color: 0xc8f060, side: THREE.DoubleSide, transparent: true, opacity: 0.6 })
+);
+neonRing.rotation.x = -Math.PI / 2;
+neonRing.position.y = -1.19;
+scene.add(neonRing);
+
+// ── PARTÍCULAS ──
+const pCount = 300;
+const pPos = new Float32Array(pCount * 3);
+for (let i = 0; i < pCount * 3; i++) pPos[i] = (Math.random() - 0.5) * 20;
+const pGeo = new THREE.BufferGeometry();
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+const particles = new THREE.Points(pGeo,
+  new THREE.PointsMaterial({ color: 0xc8f060, size: 0.025, transparent: true, opacity: 0.35 })
+);
+scene.add(particles);
+
+// ── RAYCASTER ──
+const raycaster = new THREE.Raycaster();
+const mouse2d = new THREE.Vector2();
+let modelMeshes = [];
+let mixer = null;
+let modelLoaded = false;
+
+// ── CARGAR GLB ──
+const loader = new GLTFLoader();
+loader.load(
+  'record_player.glb',
+  (gltf) => {
+    const model = gltf.scene;
+
+    // centrar y escalar
+    const box = new THREE.Box3().setFromObject(model);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const scale = 2.2 / maxDim;
+
+    model.position.sub(center.multiplyScalar(scale));
+    model.scale.setScalar(scale);
+    model.position.y += 0.1;
+
+    model.traverse(n => {
+      if (n.isMesh) {
+        n.castShadow = true;
+        n.receiveShadow = true;
+        modelMeshes.push(n);
+      }
+    });
+
+    scene.add(model);
+    modelLoaded = true;
+
+    // animaciones
+    if (gltf.animations && gltf.animations.length > 0) {
+      mixer = new THREE.AnimationMixer(model);
+      gltf.animations.forEach(clip => {
+        const action = mixer.clipAction(clip);
+        action.play();
+        action.paused = true; // arranca pausada
+      });
+      console.log(`✅ ${gltf.animations.length} animación(es) cargadas`);
+    }
+
+    // ocultar hint si el modelo cargó bien
+    console.log('✅ Modelo cargado');
+  },
+  (prog) => console.log('Cargando...', Math.round(prog.loaded / prog.total * 100) + '%'),
+  (err) => console.error('❌ Error:', err)
+);
+
+// ── UI REFS ──
+const cur = document.getElementById('cur');
+const clickRing = document.getElementById('click-ring');
+const songInfo = document.getElementById('song-info');
+const eq = document.getElementById('eq');
+const eqBars = document.querySelectorAll('.eq-bar');
+const progressFill = document.getElementById('progress-fill');
+const centerHint = document.getElementById('center-hint');
+
+// ── CURSOR ──
+document.addEventListener('mousemove', (e) => {
+  cur.style.left = e.clientX + 'px';
+  cur.style.top  = e.clientY + 'px';
+  mouse2d.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse2d.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  if (modelMeshes.length) {
+    raycaster.setFromCamera(mouse2d, camera);
+    const hits = raycaster.intersectObjects(modelMeshes);
+    cur.classList.toggle('hover', hits.length > 0);
+  }
+});
+
+// ── CLICK ──
+canvas.addEventListener('click', (e) => {
+  // burst visual
+  clickRing.style.left = e.clientX + 'px';
+  clickRing.style.top  = e.clientY + 'px';
+  clickRing.classList.remove('burst');
+  void clickRing.offsetWidth;
+  clickRing.classList.add('burst');
+
+  if (!modelLoaded) return;
+  raycaster.setFromCamera(mouse2d, camera);
+  const hits = raycaster.intersectObjects(modelMeshes);
+  if (hits.length > 0) {
+    togglePlayback();
+    centerHint.classList.add('hidden');
+  }
+});
+
+function togglePlayback() {
+  playing = !playing;
+  if (playing) {
+    audio.play().catch(() => { playing = false; });
+    songInfo.classList.add('visible');
+    eq.classList.add('visible');
+    eqBars.forEach(b => b.classList.add('playing'));
+    controls.autoRotateSpeed = 2.5;
+    // reanudar animación
+    if (mixer) mixer.timeScale = 1;
+    if (mixer) mixer.getRoot()._actions?.forEach(a => { a.paused = false; });
+    // reanudar todas las acciones
+    if (mixer) {
+      mixer._actions.forEach(a => { a.paused = false; });
+    }
+  } else {
+    audio.pause();
+    songInfo.classList.remove('visible');
+    eq.classList.remove('visible');
+    eqBars.forEach(b => b.classList.remove('playing'));
+    controls.autoRotateSpeed = 0.5;
+    if (mixer) mixer._actions.forEach(a => { a.paused = true; });
+  }
+}
+
+audio.addEventListener('timeupdate', () => {
+  if (audio.duration) {
+    progressFill.style.width = (audio.currentTime / audio.duration * 100) + '%';
+  }
+});
+
+// ── LOOP ──
+const clock = new THREE.Clock();
+let t = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const delta = clock.getDelta();
+  t += delta;
+
+  controls.update();
+  if (mixer) mixer.update(delta);
+
+  particles.rotation.y = t * 0.015;
+  particles.rotation.x = Math.sin(t * 0.05) * 0.05;
+
+  if (playing) {
+    // spotlight pulsa al ritmo
+    spot.intensity = 3 + Math.abs(Math.sin(t * 5.5)) * 5;
+    // neon ring pulsa
+    neonRing.material.opacity = 0.4 + Math.abs(Math.sin(t * 5.5)) * 0.6;
+    neonRing.scale.setScalar(1 + Math.abs(Math.sin(t * 5.5)) * 0.06);
+  } else {
+    spot.intensity = 0;
+    neonRing.material.opacity = 0.3;
+    neonRing.scale.setScalar(1);
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+
+// ── RESIZE ──
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
